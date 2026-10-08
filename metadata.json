@@ -1,0 +1,6 @@
+{
+  "name": "Rift Numeris: Isometric Extraction",
+  "description": "Um jogo tático isométrico em modo retrato de quebra-cabeça numérico, exploração com névoa de guerra e extração de equipamentos.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

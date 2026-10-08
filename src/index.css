@@ -1,0 +1,57 @@
+@import "tailwindcss";
+
+@layer base {
+  :root {
+    --font-display: 'Fredoka', 'Nunito', cursive, sans-serif;
+    --font-sans: 'Nunito', system-ui, -apple-system, sans-serif;
+    --font-mono: 'JetBrains Mono', monospace;
+  }
+
+  body {
+    font-family: var(--font-sans);
+    background-color: #1e1b4b;
+    color: #ffffff;
+    overflow: hidden;
+    user-select: none;
+    -webkit-user-select: none;
+  }
+}
+
+.font-display {
+  font-family: var(--font-display);
+  letter-spacing: 0.02em;
+}
+
+.font-mono-num {
+  font-family: var(--font-display);
+  font-variant-numeric: tabular-nums;
+}
+
+.cartoon-text-outline {
+  text-shadow: 0 2px 0 rgba(15, 23, 42, 0.85);
+}
+
+.cartoon-card {
+  border-width: 3px;
+  box-shadow: 0 4px 0 rgba(15, 23, 42, 0.55);
+}
+
+.cartoon-btn {
+  border-width: 2px;
+  box-shadow: 0 4px 0 rgba(15, 23, 42, 0.65);
+  transition: transform 0.1s ease, box-shadow 0.1s ease;
+}
+
+.cartoon-btn:active:not(:disabled) {
+  transform: translateY(2px);
+  box-shadow: 0 2px 0 rgba(15, 23, 42, 0.65);
+}
+
+@keyframes floatSlow {
+  0%, 100% { transform: translateY(0px) scale(1); }
+  50% { transform: translateY(-5px) scale(1.03); }
+}
+
+.animate-float {
+  animation: floatSlow 2.1s ease-in-out infinite;
+}
