@@ -37,10 +37,12 @@ import {
 } from './types/game';
 import {
   createEquipmentOfRarity,
+  createStarterWeapon,
   formatCompactNumber,
   fuseTwoEquipmentItems,
   generateIsometricDungeon,
   generateRandomEquipment,
+  generateUniqueItemId,
   getDisplayedPowerValue,
   getDustValueForItem,
   getFusionOutcomePreview,
@@ -58,7 +60,6 @@ import {
   RISK_MODIFIER_CHANCES_BY_RANK,
   RISK_MODIFIERS_DATA,
   rollRandomRiskModifiersForRank,
-  STARTER_WEAPON,
 } from './utils/dungeonGenerator';
 import { findGridPath } from './utils/pathfinding';
 import {
@@ -70,6 +71,8 @@ import { HeroCharacterFigure } from './components/HeroCharacterFigure';
 import {
   EquipmentDetailModal,
   EquipmentIconSVG,
+  EquipmentRevealData,
+  EquipmentRevealModal,
   LoadoutView,
   RARITY_CARD_STYLES,
   SLOT_LABELS,
@@ -121,6 +124,178 @@ interface BountyTask {
   rewardType: BountyRewardType;
   rewardAmount: number;
   rewardLabel: string;
+}
+
+// --- SISTEMA DE TÔNICOS TÁTICOS DE CINTO (COMPRADOS NO LOBBY ANTES DE ENTRAR NO PORTAL) ---
+export type BeltTonicType =
+  | 'BLOOD_FURY'
+  | 'TITAN_BANE'
+  | 'ASTRAL_OVERCHARGE'
+  | 'VOID_CLEANSE';
+
+export interface BeltTonicMeta {
+  id: BeltTonicType;
+  name: string;
+  shortName: string;
+  icon: string;
+  goldCost: number;
+  dustCost: number;
+  desc: string;
+  effectBadge: string;
+  colorClass: string;
+}
+
+export const BELT_TONICS_CATALOG: Record<BeltTonicType, BeltTonicMeta> = {
+  BLOOD_FURY: {
+    id: 'BLOOD_FURY',
+    name: 'Tônico de Fúria Sangrenta',
+    shortName: 'Fúria +45%',
+    icon: '🧪',
+    goldCost: 55,
+    dustCost: 4,
+    desc: 'Aumenta seu Poder Atual na fase em +45% na hora! Ideal após fazer Pactos ou pisar em Totens ÷2.',
+    effectBadge: '+45% PODER NA FASE',
+    colorClass: 'from-rose-500 to-red-700 border-rose-200',
+  },
+  TITAN_BANE: {
+    id: 'TITAN_BANE',
+    name: 'Veneno Quebra-Titã',
+    shortName: 'Boss -30%',
+    icon: '☠️',
+    goldCost: 70,
+    dustCost: 6,
+    desc: 'Enfraquece imediatamente o Poder do Chefão (Boss) da fase em -30%! Perfeito para Portais Vermelhos.',
+    effectBadge: '-30% PODER DO BOSS',
+    colorClass: 'from-emerald-500 to-teal-700 border-emerald-200',
+  },
+  ASTRAL_OVERCHARGE: {
+    id: 'ASTRAL_OVERCHARGE',
+    name: 'Elixir de Sobrecarga Astral',
+    shortName: 'Turbo x1.65',
+    icon: '⚡',
+    goldCost: 95,
+    dustCost: 8,
+    desc: 'Multiplica seu Poder Efetivo atual na fase por x1.65 instantaneamente!',
+    effectBadge: 'PODER x1.65 IMEDIATO',
+    colorClass: 'from-amber-400 to-orange-600 border-yellow-200',
+  },
+  VOID_CLEANSE: {
+    id: 'VOID_CLEANSE',
+    name: 'Néctar de Purificação & Visão',
+    shortName: '+30% & Mapa',
+    icon: '🔮',
+    goldCost: 65,
+    dustCost: 5,
+    desc: 'Restaura +30% de Poder Atual, desarma armadilhas ao redor e revela Pilares, Geodos e Boss no Minimapa!',
+    effectBadge: '+30% PODER & VISÃO TOTAL',
+    colorClass: 'from-purple-500 to-indigo-700 border-purple-200',
+  },
+};
+
+// --- SISTEMA DE APÓLICE DE SEGURO DO BANCO (DESCONTADO EXCLUSIVAMENTE DO COFRE BANCÁRIO!) ---
+export interface BankInsurancePolicy {
+  active: boolean; // Apólice Principal contratada (protege os 8 Equipamentos vestidos no corpo)
+  insureBackpack: boolean; // Adicional: protege também os itens da Mochila (escala com qtd, raridade e poder)
+  insureKeys: boolean; // Adicional: protege as Chaves Douradas
+  insurePickaxes: boolean; // Adicional: protege as Picaretas e Pedras Rúnicas
+}
+
+export const DEFAULT_BANK_INSURANCE: BankInsurancePolicy = {
+  active: false,
+  insureBackpack: false,
+  insureKeys: false,
+  insurePickaxes: false,
+};
+
+const RARITY_INSURANCE_BASE_FEE: Record<Rarity, number> = {
+  COMMON: 4,
+  UNCOMMON: 10,
+  RARE: 24,
+  EPIC: 55,
+  LEGENDARY: 125,
+  MYTHIC: 280,
+  CELESTIAL: 620,
+};
+
+const RANK_INSURANCE_MULTIPLIER: Record<PortalRank, number> = {
+  E: 1.0,
+  D: 1.25,
+  C: 1.6,
+  B: 2.1,
+  A: 2.8,
+  S: 3.8,
+};
+
+export function calculateItemInsuranceFee(item: EquipmentItem): number {
+  const rarityBase = RARITY_INSURANCE_BASE_FEE[item.rarity] || 5;
+  const refineFactor = 1 + (item.refineLevel || 0) * 0.18;
+  const powerStatFactor =
+    1 + item.baseBonus * 0.02 + Math.max(0, item.multBonus - 1) * 0.65;
+  return Math.max(3, Math.round(rarityBase * refineFactor * powerStatFactor));
+}
+
+export function calculateBankInsuranceBreakdown(
+  equipped: Record<EquipSlot, EquipmentItem | null>,
+  runBackpack: EquipmentItem[],
+  keysCount: number,
+  pickaxesCount: number,
+  runestonesCount: number,
+  rank: PortalRank,
+  policy: BankInsurancePolicy
+) {
+  const rankMult = RANK_INSURANCE_MULTIPLIER[rank] || 1;
+  const equippedList = Object.values(equipped).filter(Boolean) as EquipmentItem[];
+
+  // Taxa de Abertura de Contrato (paga 1 única vez ao ativar a Apólice no Banco)
+  const rawEquippedSum = equippedList.reduce(
+    (sum, it) => sum + calculateItemInsuranceFee(it),
+    0
+  );
+  const activationFee = Math.max(35, Math.round(40 + rawEquippedSum * 0.45));
+
+  // Custo por Portal dos 8 Equipamentos Vestidos (escala com Raridade, Refino e Rank do Portal)
+  const equippedPortalFee = Math.max(
+    12,
+    Math.round(rawEquippedSum * 0.55 * rankMult)
+  );
+
+  // Adicional 1: Mochila / Inventário (depende da quantidade de itens, raridades e poder de cada um)
+  const rawBackpackSum = runBackpack.reduce(
+    (sum, it) => sum + calculateItemInsuranceFee(it),
+    0
+  );
+  const backpackPortalFee =
+    runBackpack.length > 0
+      ? Math.max(
+          8 * runBackpack.length,
+          Math.round(rawBackpackSum * 0.65 * rankMult)
+        )
+      : 0;
+
+  // Adicional 2: Chaves Douradas
+  const keysPortalFee =
+    keysCount > 0 ? Math.max(8, Math.round(keysCount * 12 * rankMult)) : 0;
+
+  // Adicional 3: Picaretas + Pedras Rúnicas
+  const toolsCount = pickaxesCount + runestonesCount;
+  const pickaxesPortalFee =
+    toolsCount > 0 ? Math.max(8, Math.round(toolsCount * 10 * rankMult)) : 0;
+
+  const totalPerPortalFee =
+    (policy.active ? equippedPortalFee : 0) +
+    (policy.active && policy.insureBackpack ? backpackPortalFee : 0) +
+    (policy.active && policy.insureKeys ? keysPortalFee : 0) +
+    (policy.active && policy.insurePickaxes ? pickaxesPortalFee : 0);
+
+  return {
+    activationFee,
+    equippedPortalFee,
+    backpackPortalFee,
+    keysPortalFee,
+    pickaxesPortalFee,
+    totalPerPortalFee,
+    equippedCount: equippedList.length,
+  };
 }
 
 const SAVE_STORAGE_KEY = 'portais_santuario_save_v2';
@@ -258,7 +433,47 @@ function loadSavedProgress() {
   try {
     const raw = window.localStorage.getItem(SAVE_STORAGE_KEY);
     if (!raw) return null;
-    return JSON.parse(raw);
+    const data = JSON.parse(raw);
+    if (!data || typeof data !== 'object') return null;
+
+    // Garante que todos os equipamentos salvos (Equipados, Mochila, Armazém e Loja) tenham IDs 100% únicos,
+    // corrigindo saves antigos que tinham múltiplas Espadinhas de Treino ou drops criados no mesmo milissegundo com o mesmo ID!
+    const seenIds = new Set<string>();
+    const ensureUniqueItem = (item: EquipmentItem | null | undefined): EquipmentItem | null => {
+      if (!item || typeof item !== 'object') return null;
+      if (!item.id || seenIds.has(item.id) || item.id === 'starter-rusty-blade') {
+        const freshId = generateUniqueItemId('item');
+        seenIds.add(freshId);
+        return { ...item, id: freshId };
+      }
+      seenIds.add(item.id);
+      return item;
+    };
+
+    if (data.equipped && typeof data.equipped === 'object') {
+      const nextEq: Record<string, EquipmentItem | null> = {};
+      for (const key of Object.keys(data.equipped)) {
+        nextEq[key] = ensureUniqueItem(data.equipped[key]);
+      }
+      data.equipped = nextEq;
+    }
+    if (Array.isArray(data.runBackpack)) {
+      data.runBackpack = data.runBackpack
+        .map((it: EquipmentItem) => ensureUniqueItem(it))
+        .filter(Boolean);
+    }
+    if (Array.isArray(data.stash)) {
+      data.stash = data.stash
+        .map((it: EquipmentItem) => ensureUniqueItem(it))
+        .filter(Boolean);
+    }
+    if (Array.isArray(data.shopOffers)) {
+      data.shopOffers = data.shopOffers.map((offer: { item: EquipmentItem; price: number }) =>
+        offer?.item ? { ...offer, item: ensureUniqueItem(offer.item)! } : offer
+      );
+    }
+
+    return data;
   } catch {
     return null;
   }
@@ -281,7 +496,7 @@ export default function App() {
   const [equipped, setEquipped] = useState<Record<EquipSlot, EquipmentItem | null>>(() =>
     savedData?.equipped || {
       HELMET: null,
-      WEAPON: STARTER_WEAPON,
+      WEAPON: createStarterWeapon(),
       ARMOR: null,
       BOOTS: null,
       RING_LEFT: null,
@@ -326,6 +541,25 @@ export default function App() {
   // 3. Pedras Rúnicas (Runestones): Usadas para purificar Armadilhas de Espinhos, Totens ÷2 ou Parasitas Drenadores sem sofrer dano!
   const [runestonesCount, setRunestonesCount] = useState<number>(() =>
     typeof savedData?.runestonesCount === 'number' ? savedData.runestonesCount : 1
+  );
+  // 4. Pedra de Retorno Dimensional (Comprada no Lobby — permite escapar de Portais Vermelhos ou Voto de Sangue!)
+  const [returnStoneCount, setReturnStoneCount] = useState<number>(() =>
+    typeof savedData?.returnStoneCount === 'number' ? savedData.returnStoneCount : 0
+  );
+  // 5. Tônico Tático de Cinto (1 frasco preparado no Lobby antes de entrar no Portal!)
+  const [equippedTonic, setEquippedTonic] = useState<BeltTonicType | null>(() =>
+    savedData?.equippedTonic || null
+  );
+  const [tonicUsedInRun, setTonicUsedInRun] = useState<boolean>(false);
+  // 6. Apólice de Seguro do Banco (Taxa de ativação + cobrança por Portal descontada EXCLUSIVAMENTE do Cofre!)
+  const [bankInsurance, setBankInsurance] = useState<BankInsurancePolicy>(() =>
+    savedData?.bankInsurance
+      ? { ...DEFAULT_BANK_INSURANCE, ...savedData.bankInsurance }
+      : DEFAULT_BANK_INSURANCE
+  );
+  // Snapshot da cobertura efetivamente paga no Banco ao entrar no Portal atual
+  const [runInsuredSnapshot, setRunInsuredSnapshot] = useState<BankInsurancePolicy>(
+    DEFAULT_BANK_INSURANCE
   );
   // Quadro de Caçadas / Missões Rápidas de Grinding (Bounties)
   const [bounties, setBounties] = useState<BountyTask[]>(() =>
@@ -443,6 +677,22 @@ export default function App() {
   } | null>(null);
   const [confirmResetOpen, setConfirmResetOpen] = useState<boolean>(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState<boolean>(false);
+  const [equipmentReveal, setEquipmentReveal] = useState<EquipmentRevealData | null>(null);
+
+  const triggerEquipmentReveal = (
+    item: EquipmentItem,
+    sourceTitle: string,
+    sourceCategory: 'SHOP' | 'CHEST' | 'FORGE',
+    extraForgedCount?: number
+  ) => {
+    soundFX.playItemReveal(item.rarity);
+    setEquipmentReveal({
+      item,
+      sourceTitle,
+      sourceCategory,
+      extraForgedCount,
+    });
+  };
 
   const [runOutcome, setRunOutcome] = useState<{
     type: 'GAME_OVER' | 'EXTRACTED_CLEAN' | 'EXTRACTED_EMERGENCY';
@@ -461,6 +711,9 @@ export default function App() {
         arcaneDust,
         pickaxesCount,
         runestonesCount,
+        returnStoneCount,
+        equippedTonic,
+        bankInsurance,
         keysCount,
         portalRank,
         shopOffers,
@@ -480,6 +733,9 @@ export default function App() {
     arcaneDust,
     pickaxesCount,
     runestonesCount,
+    returnStoneCount,
+    equippedTonic,
+    bankInsurance,
     keysCount,
     portalRank,
     shopOffers,
@@ -505,7 +761,7 @@ export default function App() {
     );
     setEquipped({
       HELMET: null,
-      WEAPON: STARTER_WEAPON,
+      WEAPON: createStarterWeapon(),
       ARMOR: null,
       BOOTS: null,
       RING_LEFT: null,
@@ -523,6 +779,11 @@ export default function App() {
     setArcaneDust(8);
     setPickaxesCount(1);
     setRunestonesCount(1);
+    setReturnStoneCount(0);
+    setEquippedTonic(null);
+    setTonicUsedInRun(false);
+    setBankInsurance(DEFAULT_BANK_INSURANCE);
+    setRunInsuredSnapshot(DEFAULT_BANK_INSURANCE);
     setBounties(createInitialBounties());
     setBountiesCompletedTotal(0);
     setBankInputAmount(0);
@@ -565,7 +826,40 @@ export default function App() {
   useEffect(() => {
     const onFsChange = () => setIsFullscreen(Boolean(document.fullscreenElement));
     document.addEventListener('fullscreenchange', onFsChange);
-    return () => document.removeEventListener('fullscreenchange', onFsChange);
+
+    // Tenta iniciar em tela cheia imediatamente ao abrir; se o navegador exigir 1º toque/clique do usuário, ativa no primeiro clique!
+    let autoFsDone = false;
+    const tryEnterFullscreen = () => {
+      if (autoFsDone) return;
+      autoFsDone = true;
+      if (!document.fullscreenElement && document.documentElement.requestFullscreen) {
+        document.documentElement
+          .requestFullscreen()
+          .then(() => setIsFullscreen(true))
+          .catch(() => {});
+      }
+      window.removeEventListener('pointerdown', tryEnterFullscreen);
+      window.removeEventListener('keydown', tryEnterFullscreen);
+    };
+
+    if (!document.fullscreenElement && document.documentElement.requestFullscreen) {
+      document.documentElement
+        .requestFullscreen()
+        .then(() => {
+          autoFsDone = true;
+          setIsFullscreen(true);
+        })
+        .catch(() => {
+          window.addEventListener('pointerdown', tryEnterFullscreen, { once: true });
+          window.addEventListener('keydown', tryEnterFullscreen, { once: true });
+        });
+    }
+
+    return () => {
+      document.removeEventListener('fullscreenchange', onFsChange);
+      window.removeEventListener('pointerdown', tryEnterFullscreen);
+      window.removeEventListener('keydown', tryEnterFullscreen);
+    };
   }, []);
 
   const stepTimerRef = useRef<number | null>(null);
@@ -853,6 +1147,29 @@ export default function App() {
     });
   }, [heroPos, passiveEffects.visionRadius]);
 
+  // Cálculo em tempo real dos custos do Seguro Bancário para o Portal selecionado
+  const insuranceBreakdown = useMemo(
+    () =>
+      calculateBankInsuranceBreakdown(
+        equipped,
+        runBackpack,
+        keysCount,
+        pickaxesCount,
+        runestonesCount,
+        portalRank,
+        bankInsurance
+      ),
+    [
+      equipped,
+      runBackpack,
+      keysCount,
+      pickaxesCount,
+      runestonesCount,
+      portalRank,
+      bankInsurance,
+    ]
+  );
+
   const startNewPortalRun = (rank: PortalRank) => {
     const reqPower = PORTAL_RANKS_DATA[rank].requiredEntryPower;
     if (entryPowerAtZero < reqPower) {
@@ -866,6 +1183,32 @@ export default function App() {
     }
 
     if (stepTimerRef.current) window.clearTimeout(stepTimerRef.current);
+
+    // --- COBRANÇA AUTOMÁTICA DA APÓLICE DE SEGURO NO COFRE BANCÁRIO ---
+    const runBreakdown = calculateBankInsuranceBreakdown(
+      equipped,
+      runBackpack,
+      keysCount,
+      pickaxesCount,
+      runestonesCount,
+      rank,
+      bankInsurance
+    );
+    let effectiveRunInsurance = DEFAULT_BANK_INSURANCE;
+    let insuranceNotice: { paid: boolean; fee: number } | null = null;
+
+    if (bankInsurance.active) {
+      if (bankGold >= runBreakdown.totalPerPortalFee) {
+        setBankGold((b) => Math.max(0, b - runBreakdown.totalPerPortalFee));
+        effectiveRunInsurance = { ...bankInsurance };
+        insuranceNotice = { paid: true, fee: runBreakdown.totalPerPortalFee };
+      } else {
+        // Saldo insuficiente no Cofre Bancário (não desconta da carteira!) -> Entra SEM cobertura e avisa!
+        effectiveRunInsurance = DEFAULT_BANK_INSURANCE;
+        insuranceNotice = { paid: false, fee: runBreakdown.totalPerPortalFee };
+      }
+    }
+    setRunInsuredSnapshot(effectiveRunInsurance);
 
     // Sorteia aleatoriamente os Modificadores de Risco ao entrar no Portal (0% no Rank E, escalando até múltiplos no S!)
     const rolledModifiers = rollRandomRiskModifiersForRank(rank);
@@ -885,6 +1228,7 @@ export default function App() {
     const triggeredRedGate = Math.random() < redGateChance;
     setIsRedGateRun(triggeredRedGate);
     setPhoenixShieldUsed(false);
+    setTonicUsedInRun(false);
     setActivePortalEvent(null);
 
     const fresh = generateIsometricDungeon(
@@ -919,9 +1263,23 @@ export default function App() {
     setIsLoadoutModalOpen(false);
     setAppScreen('GAMEPLAY');
 
+    if (insuranceNotice) {
+      if (insuranceNotice.paid) {
+        addFloatingText(
+          `🛡️ Seguro Ativo! -${insuranceNotice.fee} 🪙 descontados do Cofre Bancário.`,
+          '#34d399'
+        );
+      } else {
+        addFloatingText(
+          `⚠️ COFRE SEM SALDO (${bankGold}/${insuranceNotice.fee} 🪙)! Você entrou SEM cobertura do Seguro!`,
+          '#fb7185'
+        );
+      }
+    }
+
     if (triggeredRedGate) {
       addFloatingText(
-        `🩸 PORTAL VERMELHO DETECTADO! Sem Fuga · Boss dropa +1 Tier Acima do Limite!`,
+        `🩸 PORTAL VERMELHO DETECTADO! Sem Fuga normal · Boss dropa +1 Tier Acima!`,
         '#ef4444'
       );
     } else if (rolledModifiers.length > 0) {
@@ -1476,38 +1834,101 @@ export default function App() {
               '#fb923c'
             );
           } else {
-            // Game Over Imediato: perde TODO o Loadout do Herói (equipamentos do corpo + mochila), Ouro da carteira, Chaves, Picaretas e Pedras Rúnicas (mantendo apenas o Pó Mágico, o Baú Seguro e o Ouro do Cofre)!
+            // Game Over Imediato: Verifica quais coberturas da Apólice do Banco estavam pagas para esta incursão!
+            const ins = runInsuredSnapshot;
             const lostWalletGold = goldCoins;
             const lostBackpackCount = runBackpack.length;
             const lostKeys = keysCount;
             const lostPickaxes = pickaxesCount;
             const lostRunestones = runestonesCount;
+
             setHeroPos(nextStep);
             setWalkingPath([]);
-            setEquipped({
-              HELMET: null,
-              WEAPON: STARTER_WEAPON,
-              ARMOR: null,
-              BOOTS: null,
-              RING_LEFT: null,
-              BACK: null,
-              PET_LEFT: null,
-              PET_RIGHT: null,
-            });
             setGoldCoins(0);
-            setKeysCount(0);
-            setPickaxesCount(0);
-            setRunestonesCount(0);
-            setRunBackpack([]);
-            setPortalRank('E');
-            setBounties(createInitialBounties('E'));
+            setReturnStoneCount(0);
+            setEquippedTonic(null);
+            setTonicUsedInRun(false);
+
+            // 1. Equipamentos vestidos no corpo: protegidos se a Apólice Principal estava paga!
+            if (!ins.active) {
+              setEquipped({
+                HELMET: null,
+                WEAPON: createStarterWeapon(),
+                ARMOR: null,
+                BOOTS: null,
+                RING_LEFT: null,
+                BACK: null,
+                PET_LEFT: null,
+                PET_RIGHT: null,
+              });
+              setPortalRank('E');
+              setBounties(createInitialBounties('E'));
+            } else {
+              // Se manteve os equipamentos graças ao Seguro, re-sorteia as missões para o Rank atual
+              setBounties(createInitialBounties(portalRank));
+            }
+
+            // 2. Mochila / Inventário da incursão: protegido se o adicional de Inventário estava ativo!
+            if (!ins.active || !ins.insureBackpack) {
+              setRunBackpack([]);
+            }
+
+            // 3. Chaves Douradas: protegidas se o adicional de Chaves estava ativo!
+            if (!ins.active || !ins.insureKeys) {
+              setKeysCount(0);
+            }
+
+            // 4. Picaretas e Pedras Rúnicas: protegidas se o adicional de Picaretas estava ativo!
+            if (!ins.active || !ins.insurePickaxes) {
+              setPickaxesCount(0);
+              setRunestonesCount(0);
+            }
+
+            const savedParts: string[] = [];
+            const lostParts: string[] = [`${lostWalletGold} Ouro da carteira`];
+
+            if (ins.active) {
+              savedParts.push('seus 8 Equipamentos Vestidos');
+            } else {
+              lostParts.push('seus equipamentos vestidos');
+            }
+
+            if (ins.active && ins.insureBackpack) {
+              if (lostBackpackCount > 0) savedParts.push(`${lostBackpackCount} item(ns) da Mochila`);
+            } else if (lostBackpackCount > 0) {
+              lostParts.push(`${lostBackpackCount} item(ns) na mochila`);
+            }
+
+            if (ins.active && ins.insureKeys) {
+              if (lostKeys > 0) savedParts.push(`${lostKeys} Chave(s)`);
+            } else if (lostKeys > 0) {
+              lostParts.push(`${lostKeys} Chave(s)`);
+            }
+
+            if (ins.active && ins.insurePickaxes) {
+              if (lostPickaxes + lostRunestones > 0) {
+                savedParts.push(`${lostPickaxes} Picareta(s) e ${lostRunestones} Runa(s)`);
+              }
+            } else if (lostPickaxes + lostRunestones > 0) {
+              lostParts.push(`${lostPickaxes} Picareta(s) e ${lostRunestones} Runa(s)`);
+            }
+
+            const insuranceSummaryText =
+              savedParts.length > 0
+                ? ` 🛡️ APÓLICE DO BANCO ACIONADA: O Seguro resgatou intactos ${savedParts.join(
+                    ', '
+                  )}! Você perdeu apenas: ${lostParts.join(', ')}.`
+                : ` Você perdeu ${lostParts.join(
+                    ', '
+                  )}, e suas Missões foram re-sorteadas para o Rank E! (Apenas seu Pó Mágico ✨, itens no Baú Seguro e Ouro no Cofre foram preservados).`;
+
             setRunOutcome({
               type: 'GAME_OVER',
               reason: `Seu Poder (${formatCompactNumber(heroTotalPower)}) não superou ${
                 entity.name || 'o inimigo'
               } (Poder ${formatCompactNumber(
                 effectiveEnemyPower
-              )}). Você perdeu seus equipamentos vestidos, ${lostBackpackCount} item(ns) na mochila, ${lostWalletGold} Ouro da carteira, ${lostKeys} Chave(s), ${lostPickaxes} Picareta(s) e ${lostRunestones} Pedra(s) Rúnica(s), e suas Missões de Caçada foram re-sorteadas do zero para o Rank E! (Apenas seu Pó Mágico ✨, itens no Baú Seguro e Ouro no Cofre foram preservados).`,
+              )}).${insuranceSummaryText}`,
             });
           }
         }, 390);
@@ -1771,11 +2192,33 @@ export default function App() {
   };
 
   const handleEmergencyExtraction = () => {
-    if ((riskSummary.disableEmergencyExit || isRedGateRun) && !bossDefeated) {
+    const isPortalLocked = (riskSummary.disableEmergencyExit || isRedGateRun) && !bossDefeated;
+    if (isPortalLocked) {
+      // Se o jogador se preparou no Lobby e trouxe uma Pedra de Retorno Dimensional, ela quebra o bloqueio!
+      if (returnStoneCount > 0) {
+        setReturnStoneCount((c) => Math.max(0, c - 1));
+        const lostBackpackCount = runBackpack.length;
+        setWalkingPath([]);
+        setRunBackpack([]);
+        soundFX.playPowerUp(true);
+        setRunOutcome({
+          type: 'EXTRACTED_EMERGENCY',
+          reason:
+            lostBackpackCount > 0
+              ? `📜 PEDRA DE RETORNO ATIVADA! Você rompeu a barreira dimensional do ${
+                  isRedGateRun ? 'Portal Vermelho' : 'Voto de Sangue'
+                } e salvou seus 8 equipamentos vestidos e recursos, mas deixou cair os ${lostBackpackCount} item(ns) da Mochila!`
+              : `📜 PEDRA DE RETORNO ATIVADA! Você rompeu a barreira dimensional do ${
+                  isRedGateRun ? 'Portal Vermelho' : 'Voto de Sangue'
+                } e escapou com vida mantendo todos os seus equipamentos vestidos!`,
+        });
+        return;
+      }
+
       addFloatingText(
         isRedGateRun
-          ? '🩸 Portal Vermelho trancado: Derrote o Monarca Carmesim para poder sair!'
-          : '🩸 Voto de Sangue ativo: Derrote o Boss para poder extrair do Portal!',
+          ? '🩸 Portal Vermelho trancado! Sem Pedra de Retorno (📜), derrote o Monarca para sair!'
+          : '🩸 Voto de Sangue ativo! Sem Pedra de Retorno (📜), derrote o Boss para sair!',
         '#f87171'
       );
       return;
@@ -1793,9 +2236,189 @@ export default function App() {
     });
   };
 
+  // Comprar Pedra de Retorno Dimensional no Lobby (Máx 2 acumuladas no bolso)
+  const handleBuyReturnStone = (goldCost = 85, dustCost = 6) => {
+    if (returnStoneCount >= 2) {
+      addFloatingText('📜 Você já carrega o limite máximo de 2 Pedras de Retorno!', '#facc15');
+      return;
+    }
+    if (arcaneDust < dustCost) {
+      addFloatingText(`Precisa de ${dustCost} ✨ Pó Mágico para forjar a Pedra de Retorno!`, '#67e8f9');
+      return;
+    }
+    if (!deductGoldFromWalletOrBank(goldCost)) {
+      addFloatingText(`Precisa de ${goldCost} 🪙 Ouro (Bolso ou Cofre)!`, '#f87171');
+      return;
+    }
+    setArcaneDust((d) => Math.max(0, d - dustCost));
+    setReturnStoneCount((c) => c + 1);
+    soundFX.playPowerUp(true);
+    addFloatingText(
+      '📜 +1 Pedra de Retorno Dimensional preparada! (Permite escapar de Portais Vermelhos)',
+      '#38bdf8'
+    );
+  };
+
+  // Comprar / Preparar Tônico Tático de Cinto no Lobby (1 por incursão)
+  const handleBuyBeltTonic = (tonicType: BeltTonicType) => {
+    const meta = BELT_TONICS_CATALOG[tonicType];
+    if (equippedTonic === tonicType) {
+      addFloatingText(`${meta.icon} ${meta.name} já está preparado no seu cinto!`, '#facc15');
+      return;
+    }
+    if (arcaneDust < meta.dustCost) {
+      addFloatingText(`Precisa de ${meta.dustCost} ✨ Pó Mágico para preparar este Tônico!`, '#67e8f9');
+      return;
+    }
+    if (!deductGoldFromWalletOrBank(meta.goldCost)) {
+      addFloatingText(`Precisa de ${meta.goldCost} 🪙 Ouro para comprar este Tônico!`, '#f87171');
+      return;
+    }
+    setArcaneDust((d) => Math.max(0, d - meta.dustCost));
+    setEquippedTonic(tonicType);
+    setTonicUsedInRun(false);
+    soundFX.playPowerUp(true);
+    addFloatingText(`${meta.icon} ${meta.name} equipado no cinto para a próxima fase!`, '#4ade80');
+  };
+
+  // Consumir o Tônico Tático de Cinto durante a incursão no Portal!
+  const handleUseBeltTonicInPortal = () => {
+    if (!equippedTonic || tonicUsedInRun) {
+      addFloatingText('🧪 Nenhum Tônico no cinto! Prepare um na Loja antes de entrar no Portal.', '#f87171');
+      return;
+    }
+    const meta = BELT_TONICS_CATALOG[equippedTonic];
+    setTonicUsedInRun(true);
+    setEquippedTonic(null);
+    soundFX.playPowerUp(true);
+
+    if (equippedTonic === 'BLOOD_FURY') {
+      // +45% de Poder Efetivo imediato na fase
+      setRunAccumulatedPower((prev) => {
+        const curEff = prev + equipBaseSum;
+        const nextEff = Math.max(curEff + 3, Math.round(curEff * 1.45));
+        return Math.max(0, nextEff - equipBaseSum);
+      });
+      triggerPowerSurge('🧪 FÚRIA +45%', 'MULT');
+      addFloatingText('🧪 Tônico de Fúria Sangrenta: +45% de Poder Atual na fase!', '#fb7185');
+    } else if (equippedTonic === 'TITAN_BANE') {
+      // Enfraquece o Boss da fase em -30% imediatamente!
+      setDungeon((prev) => {
+        const nextGrid = prev.grid.map((row) =>
+          row.map((cell) => {
+            if (cell.entity.isBoss && cell.entity.value) {
+              return {
+                ...cell,
+                entity: {
+                  ...cell.entity,
+                  value: Math.max(8, Math.round(cell.entity.value * 0.7)),
+                },
+              };
+            }
+            return cell;
+          })
+        );
+        return { ...prev, grid: nextGrid };
+      });
+      triggerPowerSurge('☠️ BOSS -30%', 'SLAY');
+      addFloatingText('☠️ Veneno Quebra-Titã ativado! O Boss perdeu -30% de Poder!', '#34d399');
+    } else if (equippedTonic === 'ASTRAL_OVERCHARGE') {
+      // Multiplica o Poder Efetivo por x1.65!
+      setRunAccumulatedPower((prev) => {
+        const curEff = prev + equipBaseSum;
+        const nextEff = Math.max(curEff + 5, Math.round(curEff * 1.65));
+        return Math.max(0, nextEff - equipBaseSum);
+      });
+      triggerPowerSurge('⚡ TURBO x1.65', 'MULT');
+      addFloatingText('⚡ Sobrecarga Astral! Seu Poder na fase foi multiplicado por x1.65!', '#facc15');
+    } else if (equippedTonic === 'VOID_CLEANSE') {
+      // +30% Poder Atual + Purifica armadilhas/totens/drenadores em raio 2 + Revela Mapa!
+      setRunAccumulatedPower((prev) => {
+        const curEff = prev + equipBaseSum;
+        const nextEff = Math.max(curEff + 3, Math.round(curEff * 1.3));
+        return Math.max(0, nextEff - equipBaseSum);
+      });
+      setDungeon((prev) => {
+        const nextGrid = prev.grid.map((row) =>
+          row.map((cell) => {
+            const dist = getChebyshevDistance(heroPos, { x: cell.x, y: cell.y });
+            const isHazard =
+              cell.entity.type === 'TRAP_SPIKES' ||
+              cell.entity.type === 'TRAP_DIVIDE' ||
+              cell.entity.type === 'ENEMY_DRAIN';
+            const shouldReveal =
+              cell.entity.isBoss ||
+              cell.entity.type === 'SEAL_PILLAR' ||
+              cell.entity.type === 'CRYSTAL_GEODE' ||
+              cell.entity.type === 'KEY_GOLD' ||
+              cell.entity.type.startsWith('EVENT_');
+            return {
+              ...cell,
+              isFragile: dist <= 2 ? false : cell.isFragile,
+              revealed: shouldReveal ? true : cell.revealed,
+              entity: dist <= 2 && isHazard ? { type: 'NONE' } : cell.entity,
+            };
+          })
+        );
+        return { ...prev, grid: nextGrid };
+      });
+      triggerPowerSurge('🔮 +30% & MAPA', 'ORB');
+      addFloatingText(
+        `🔮 ${meta.name}: +30% Poder, Armadilhas purificadas e Mapa revelado!`,
+        '#c084fc'
+      );
+    }
+  };
+
+  // Ativar ou Cancelar a Apólice Principal de Seguro no Banco (Taxa inicial descontada EXCLUSIVAMENTE do Cofre!)
+  const handleToggleBankInsuranceMain = () => {
+    if (bankInsurance.active) {
+      setBankInsurance(DEFAULT_BANK_INSURANCE);
+      soundFX.playStep();
+      addFloatingText('🛡️ Apólice de Seguro cancelada.', '#94a3b8');
+      return;
+    }
+    const fee = insuranceBreakdown.activationFee;
+    if (bankGold < fee) {
+      addFloatingText(
+        `🏦 Saldo insuficiente no COFRE BANCÁRIO! Deposite pelo menos ${fee} 🪙 no Cofre para assinar a Apólice.`,
+        '#f87171'
+      );
+      return;
+    }
+    setBankGold((b) => Math.max(0, b - fee));
+    setBankInsurance((prev) => ({ ...prev, active: true }));
+    soundFX.playKeyUnlock();
+    addFloatingText(
+      `🛡️ Apólice Assinada! -${fee} 🪙 do Cofre. Seus 8 Equipamentos estão segurados!`,
+      '#34d399'
+    );
+  };
+
+  const handleToggleInsuranceRider = (
+    rider: 'insureBackpack' | 'insureKeys' | 'insurePickaxes'
+  ) => {
+    if (!bankInsurance.active) {
+      addFloatingText('Ative primeiro a Apólice Principal para adicionar coberturas extras!', '#facc15');
+      return;
+    }
+    setBankInsurance((prev) => ({
+      ...prev,
+      [rider]: !prev[rider],
+    }));
+    soundFX.playStep();
+  };
+
+  // Helper seguro que remove APENAS 1 instância de um item pelo ID (evita apagar cópias caso algum save antigo tivesse ID repetido)
+  const removeSingleItemById = (list: EquipmentItem[], targetId: string): EquipmentItem[] => {
+    const idx = list.findIndex((i) => i.id === targetId);
+    if (idx === -1) return list;
+    return [...list.slice(0, idx), ...list.slice(idx + 1)];
+  };
+
   // Guardar 1 item da Mochila do Loadout para o Cofre do Armazém Seguro
   const handleStoreItemInStash = (item: EquipmentItem) => {
-    setRunBackpack((bag) => bag.filter((i) => i.id !== item.id));
+    setRunBackpack((bag) => removeSingleItemById(bag, item.id));
     setStash((prev) => [item, ...prev]);
     soundFX.playStep();
     addFloatingText(`${item.name} guardado no Armazém Seguro!`, '#c084fc');
@@ -1813,7 +2436,7 @@ export default function App() {
 
   // Retirar 1 item do Armazém Seguro para a Mochila do Loadout do Herói
   const handleTakeFromStashToBackpack = (item: EquipmentItem) => {
-    setStash((prev) => prev.filter((i) => i.id !== item.id));
+    setStash((prev) => removeSingleItemById(prev, item.id));
     setRunBackpack((bag) => [item, ...bag]);
     soundFX.playStep();
     addFloatingText(`${item.name} movido para a Mochila do Herói!`, '#38bdf8');
@@ -1823,7 +2446,7 @@ export default function App() {
   const handleEquipFromStash = (item: EquipmentItem) => {
     const currentInSlot = equipped[item.slot];
     setEquipped((eq) => ({ ...eq, [item.slot]: item }));
-    setStash((s) => s.filter((i) => i.id !== item.id));
+    setStash((s) => removeSingleItemById(s, item.id));
     if (currentInSlot) {
       setRunBackpack((bag) => [currentInSlot, ...bag]);
     }
@@ -1889,16 +2512,18 @@ export default function App() {
       runBackpack.some((i) => i.id === itemA.id || i.id === itemB.id);
 
     setRunBackpack((prev) => {
-      const filtered = prev.filter((i) => i.id !== itemA.id && i.id !== itemB.id);
+      const afterA = removeSingleItemById(prev, itemA.id);
+      const filtered = removeSingleItemById(afterA, itemB.id);
       return wasAnyInBackpackOrEquipped ? [forged, ...filtered] : filtered;
     });
 
     setStash((prev) => {
-      const filtered = prev.filter((i) => i.id !== itemA.id && i.id !== itemB.id);
+      const afterA = removeSingleItemById(prev, itemA.id);
+      const filtered = removeSingleItemById(afterA, itemB.id);
       return !wasAnyInBackpackOrEquipped ? [forged, ...filtered] : filtered;
     });
 
-    soundFX.playPowerUp(true);
+    triggerEquipmentReveal(forged, '🔥 Forjado na Forja Mística!', 'FORGE');
     notifyItemObtained(forged, '✨ Fusão Concluída!');
   };
 
@@ -2080,8 +2705,13 @@ export default function App() {
     setForgeSlotA(null);
     setForgeSlotB(null);
 
-    soundFX.playPowerUp(true);
     if (forgedItems.length > 0) {
+      triggerEquipmentReveal(
+        forgedItems[0],
+        '⚡ Auto-Fusão na Forja Mística!',
+        'FORGE',
+        forgedItems.length
+      );
       notifyItemObtained(
         forgedItems[0],
         `⚡ Auto-Fusão (${pairsToExecute.length}x concluídas -> Baú!)`
@@ -2097,7 +2727,7 @@ export default function App() {
     }
     const val = getSellValueForItem(item);
     const dust = getDustValueForItem(item);
-    setStash((prev) => prev.filter((i) => i.id !== item.id));
+    setStash((prev) => removeSingleItemById(prev, item.id));
     setGoldCoins((g) => g + val);
     setArcaneDust((d) => d + dust);
     soundFX.playKeyUnlock();
@@ -2138,7 +2768,7 @@ export default function App() {
     }
     const val = getSellValueForItem(item);
     const dust = getDustValueForItem(item);
-    setRunBackpack((prev) => prev.filter((i) => i.id !== item.id));
+    setRunBackpack((prev) => removeSingleItemById(prev, item.id));
     setGoldCoins((g) => g + val);
     setArcaneDust((d) => d + dust);
     soundFX.playKeyUnlock();
@@ -2197,7 +2827,7 @@ export default function App() {
           : o
       )
     );
-    soundFX.playPowerUp(true);
+    triggerEquipmentReveal(offer.item, '🛍️ Comprado na Vitrine da Loja!', 'SHOP');
     notifyItemObtained(offer.item, '🛍️ Comprado na Loja (Enviado p/ Mochila)');
   };
 
@@ -2223,7 +2853,15 @@ export default function App() {
       tier === 'WINGS_SPECIAL' ? 'BACK' : undefined
     );
     setRunBackpack((prev) => [item, ...prev]);
-    soundFX.playPowerUp(true);
+    triggerEquipmentReveal(
+      item,
+      tier === 'ROYAL'
+        ? '👑 Baú Real do Rei Aberto!'
+        : tier === 'WINGS_SPECIAL'
+        ? '🪽 Baú Especial das Asas Aberto!'
+        : '📦 Caixote Surpresa Aberto!',
+      'CHEST'
+    );
     notifyItemObtained(item, '📦 Baú Surpresa Aberto na Loja!');
   };
 
@@ -2338,10 +2976,30 @@ export default function App() {
     const prevEquipped = equipped[item.slot];
     setEquipped((eq) => ({ ...eq, [item.slot]: item }));
     setRunBackpack((bag) => {
-      const filtered = bag.filter((i) => i.id !== item.id);
+      const filtered = removeSingleItemById(bag, item.id);
       return prevEquipped ? [...filtered, prevEquipped] : filtered;
     });
     soundFX.playPowerUp(false);
+  };
+
+  // Equipar item diretamente a partir da Tela de Revelação (funciona para itens na Mochila ou no Baú!)
+  const handleEquipRevealedItem = (item: EquipmentItem) => {
+    const prevEquipped = equipped[item.slot];
+    const isInBackpack = runBackpack.some((i) => i.id === item.id);
+    setEquipped((eq) => ({ ...eq, [item.slot]: item }));
+    if (isInBackpack) {
+      setRunBackpack((bag) => {
+        const filtered = removeSingleItemById(bag, item.id);
+        return prevEquipped ? [prevEquipped, ...filtered] : filtered;
+      });
+    } else {
+      setStash((st) => removeSingleItemById(st, item.id));
+      if (prevEquipped) {
+        setRunBackpack((bag) => [prevEquipped, ...bag]);
+      }
+    }
+    soundFX.playPowerUp(false);
+    addFloatingText(`⚔️ ${item.name} equipado no Herói!`, '#4ade80');
   };
 
   const handleUnequipToBackpack = (slot: EquipSlot) => {
@@ -2719,9 +3377,99 @@ export default function App() {
                         <span className="text-purple-300 font-black">
                           🔮 {runestonesCount}
                         </span>
+                        <span className="text-sky-300 font-black">
+                          📜 {returnStoneCount}
+                        </span>
+                        {equippedTonic && (
+                          <span className="text-emerald-300 font-black">
+                            {BELT_TONICS_CATALOG[equippedTonic].icon}{' '}
+                            {BELT_TONICS_CATALOG[equippedTonic].shortName}
+                          </span>
+                        )}
                       </div>
                     </div>
                     <Flame className="w-9 h-9 text-yellow-300 shrink-0 drop-shadow" />
+                  </div>
+
+                  {/* AVISO DE SEGURO DO BANCO & PREPARO DE SOBREVIVÊNCIA (PEDRA DE RETORNO + TÔNICO) */}
+                  <div
+                    className={`rounded-2xl border-2 p-2.5 shadow-[0_4px_0_#0f172a] flex flex-col gap-1.5 shrink-0 text-white ${
+                      bankInsurance.active
+                        ? bankGold >= insuranceBreakdown.totalPerPortalFee
+                          ? 'bg-gradient-to-r from-[#065f46] to-[#047857] border-emerald-300'
+                          : 'bg-gradient-to-r from-[#9f1239] to-[#881337] border-rose-300 animate-pulse'
+                        : 'bg-indigo-950/90 border-sky-400/50'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-1.5 min-w-0">
+                        <span className="text-xs shrink-0">
+                          {bankInsurance.active
+                            ? bankGold >= insuranceBreakdown.totalPerPortalFee
+                              ? '🛡️'
+                              : '⚠️'
+                            : '🏦'}
+                        </span>
+                        <span className="text-[10px] font-black uppercase tracking-wider text-yellow-300 truncate cartoon-text-outline">
+                          {bankInsurance.active
+                            ? bankGold >= insuranceBreakdown.totalPerPortalFee
+                              ? `Seguro Ativo · Taxa Rank ${portalRank}: -${insuranceBreakdown.totalPerPortalFee} 🪙 do Cofre`
+                              : `ALERTA: Cofre sem saldo (${bankGold}/${insuranceBreakdown.totalPerPortalFee} 🪙)! Entrará SEM Seguro!`
+                            : 'Sem Apólice de Seguro Ativa (Risco Total na Morte)'}
+                        </span>
+                      </div>
+                      <button
+                        onClick={() => setLobbyTab('BANK')}
+                        className="px-2 py-0.5 rounded-lg bg-yellow-300 hover:bg-yellow-200 text-slate-950 text-[9px] font-black shrink-0 border border-white shadow"
+                      >
+                        {bankInsurance.active ? 'Ajustar Apólice' : 'Contratar no Cofre'}
+                      </button>
+                    </div>
+
+                    <div className="flex items-center justify-between gap-1.5 text-[9px] font-bold text-sky-100 border-t border-white/15 pt-1 flex-wrap">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span>
+                          📜 Retorno:{' '}
+                          <strong
+                            className={
+                              returnStoneCount > 0 ? 'text-cyan-300' : 'text-rose-300'
+                            }
+                          >
+                            {returnStoneCount}/2
+                          </strong>
+                        </span>
+                        <span>·</span>
+                        <span>
+                          🧪 Cinto:{' '}
+                          <strong
+                            className={
+                              equippedTonic ? 'text-emerald-300' : 'text-rose-300'
+                            }
+                          >
+                            {equippedTonic
+                              ? `${BELT_TONICS_CATALOG[equippedTonic].icon} ${BELT_TONICS_CATALOG[equippedTonic].shortName}`
+                              : 'Vazio'}
+                          </strong>
+                        </span>
+                        {bankInsurance.active && (
+                          <>
+                            <span>·</span>
+                            <span className="text-emerald-200 font-mono-num">
+                              Cobre: Corpo
+                              {bankInsurance.insureBackpack ? '+Mochila' : ''}
+                              {bankInsurance.insureKeys ? '+🔑' : ''}
+                              {bankInsurance.insurePickaxes ? '+⛏️' : ''}
+                            </span>
+                          </>
+                        )}
+                      </div>
+                      <button
+                        onClick={() => setLobbyTab('SHOP')}
+                        className="text-[9px] font-black text-yellow-200 underline hover:text-white"
+                      >
+                        Preparar Tônico/Pedra ➔
+                      </button>
+                    </div>
                   </div>
 
                   {/* QUADRO DE CAÇADAS / MISSÕES RÁPIDAS DE GRINDING (BOUNTIES) */}
@@ -3644,6 +4392,115 @@ export default function App() {
                     </button>
                   </div>
 
+                  {/* Seção 2: PREPARO DE SOBREVIVÊNCIA (Pedra de Retorno Dimensional & 4 Tônicos Táticos de Cinto!) */}
+                  <div className="rounded-3xl bg-gradient-to-b from-[#1e3a8a] via-[#1e1b4b] to-[#0f172a] border-3 border-cyan-300 p-3.5 shadow-[0_5px_0_#020617] flex flex-col gap-2.5 text-white">
+                    <div className="flex items-center justify-between gap-2">
+                      <div>
+                        <span className="text-[10px] font-black uppercase tracking-wider text-cyan-300 block">
+                          ★ PREPARO ANTI-ARMADILHA & PORTAL VERMELHO ★
+                        </span>
+                        <h3 className="text-xs font-black font-display cartoon-text-outline">
+                          Pedra de Retorno & Tônicos de Cinto (1 por Fase)
+                        </h3>
+                      </div>
+                      <span className="text-[10px] font-mono-num font-black px-2 py-1 rounded-xl bg-indigo-950 border border-purple-400/50 text-purple-200">
+                        ✨ {arcaneDust} Pó
+                      </span>
+                    </div>
+
+                    {/* Pedra de Retorno Dimensional */}
+                    <button
+                      onClick={() => handleBuyReturnStone(85, 6)}
+                      disabled={returnStoneCount >= 2}
+                      className={`w-full rounded-2xl border-2 p-2.5 text-left flex items-center justify-between gap-2 transition-all active:scale-95 ${
+                        returnStoneCount >= 2
+                          ? 'bg-slate-900/90 border-cyan-400/40 text-cyan-200 cursor-not-allowed'
+                          : 'bg-gradient-to-r from-[#0284c7] to-[#1d4ed8] border-cyan-200 shadow-[0_4px_0_#0c4a6e]'
+                      }`}
+                    >
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <span className="text-xs font-black text-yellow-300">
+                            📜 PEDRA DE RETORNO DIMENSIONAL
+                          </span>
+                          <span className="px-1.5 py-0.5 rounded-full bg-indigo-950 text-[9px] font-black text-cyan-300 font-mono-num border border-cyan-400/40">
+                            No Bolso: {returnStoneCount}/2
+                          </span>
+                        </div>
+                        <div className="text-[10px] text-sky-100 font-bold leading-snug mt-0.5">
+                          Rompe o bloqueio de <strong>Portais Vermelhos</strong> e <strong>Voto de Sangue</strong>! Permite fugir com vida salvando seus 8 equipamentos vestidos (perde apenas a Mochila).
+                        </div>
+                      </div>
+                      <div className="px-2.5 py-1.5 rounded-xl bg-yellow-300 border-2 border-white text-slate-950 text-[10px] font-black font-mono-num shrink-0 text-center">
+                        {returnStoneCount >= 2 ? (
+                          <span>MÁX (2/2)</span>
+                        ) : (
+                          <>
+                            <div>🪙 85</div>
+                            <div>✨ 6 Pó</div>
+                          </>
+                        )}
+                      </div>
+                    </button>
+
+                    {/* 4 Tônicos Táticos de Cinto */}
+                    <div className="flex items-center justify-between text-[10px] font-black text-yellow-200 pt-1 border-t border-white/15">
+                      <span>🧪 Escolha 1 Tônico p/ levar no Cinto:</span>
+                      <span className="text-emerald-300">
+                        {equippedTonic
+                          ? `Equipado: ${BELT_TONICS_CATALOG[equippedTonic].icon} ${BELT_TONICS_CATALOG[equippedTonic].shortName}`
+                          : 'Nenhum equipado'}
+                      </span>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-2">
+                      {(Object.keys(BELT_TONICS_CATALOG) as BeltTonicType[]).map((tKey) => {
+                        const tonic = BELT_TONICS_CATALOG[tKey];
+                        const isEquippedTonic = equippedTonic === tKey;
+                        return (
+                          <button
+                            key={tKey}
+                            onClick={() => handleBuyBeltTonic(tKey)}
+                            className={`rounded-2xl bg-gradient-to-b ${tonic.colorClass} border-2 p-2.5 text-left flex flex-col justify-between gap-2 shadow-md transition-all active:scale-95 ${
+                              isEquippedTonic ? 'ring-3 ring-yellow-300 scale-[1.02]' : ''
+                            }`}
+                          >
+                            <div>
+                              <div className="flex items-center justify-between gap-1">
+                                <span className="text-sm">{tonic.icon}</span>
+                                <span className="text-[8px] font-black px-1.5 py-0.5 rounded bg-black/45 text-yellow-300 font-mono-num">
+                                  {tonic.effectBadge}
+                                </span>
+                              </div>
+                              <div className="text-[11px] font-black text-white cartoon-text-outline mt-1 leading-tight">
+                                {tonic.name}
+                              </div>
+                              <div className="text-[9px] text-white/90 font-bold leading-snug mt-0.5">
+                                {tonic.desc}
+                              </div>
+                            </div>
+
+                            <div
+                              className={`w-full py-1 rounded-xl text-[10px] font-black font-mono-num flex items-center justify-center gap-1.5 border ${
+                                isEquippedTonic
+                                  ? 'bg-emerald-400 text-slate-950 border-white'
+                                  : 'bg-yellow-300 text-slate-950 border-white'
+                              }`}
+                            >
+                              {isEquippedTonic ? (
+                                <span>✓ NO CINTO</span>
+                              ) : (
+                                <span>
+                                  🪙 {tonic.goldCost} + ✨ {tonic.dustCost}
+                                </span>
+                              )}
+                            </div>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+
                   {/* Seção 2: Vitrine de Equipamentos Específicos */}
                   <div className="flex flex-col gap-2">
                     <div className="flex items-center justify-between">
@@ -3841,6 +4698,194 @@ export default function App() {
                             : `(Tudo: ${bankGold} 🪙)`}
                         </span>
                       </button>
+                    </div>
+                  </div>
+
+                  {/* =================================================================
+                      PAINEL DE APÓLICE DE SEGURO DA GUILDA (COBRADO DIRETO DO COFRE!)
+                     ================================================================= */}
+                  <div className="rounded-3xl bg-gradient-to-b from-[#0f172a] via-[#1e1b4b] to-[#172554] border-3 border-amber-300 p-4 shadow-[0_6px_0_#020617] flex flex-col gap-3 text-white">
+                    <div className="flex items-center justify-between gap-2">
+                      <div>
+                        <span className="text-[10px] font-black tracking-wider text-yellow-300 uppercase block">
+                          🛡️ SEGURADORA REAL DO SANTUÁRIO
+                        </span>
+                        <h3 className="text-sm font-black font-display cartoon-text-outline mt-0.5">
+                          Apólice de Seguro Contra Morte
+                        </h3>
+                      </div>
+                      <span
+                        className={`px-2.5 py-1 rounded-full text-[10px] font-black border ${
+                          bankInsurance.active
+                            ? 'bg-emerald-500/25 border-emerald-300 text-emerald-200'
+                            : 'bg-rose-500/20 border-rose-400/50 text-rose-200'
+                        }`}
+                      >
+                        {bankInsurance.active ? '● ATIVA' : '○ INATIVA'}
+                      </span>
+                    </div>
+
+                    <p className="text-[11px] text-sky-100 font-bold leading-relaxed">
+                      Protege seus itens se você morrer dentro de um Portal! Paga uma <strong>Taxa de Adesão</strong> ao ativar e uma <strong>Taxa por Portal</strong> (que escala com a Raridade/Poder dos itens e o Rank do Mundo), descontada <strong>exclusivamente das moedas no Cofre</strong>!
+                    </p>
+
+                    {/* Botão Principal: Ativar / Cancelar Apólice Base (8 Equipamentos Vestidos) */}
+                    <div className="rounded-2xl bg-indigo-950/90 border-2 border-amber-300/60 p-3 flex flex-col gap-2">
+                      <div className="flex items-center justify-between gap-2">
+                        <div>
+                          <div className="text-xs font-black text-yellow-300">
+                            1. Cobertura Principal (8 Equipamentos do Corpo)
+                          </div>
+                          <div className="text-[10px] text-slate-300 font-bold mt-0.5">
+                            Adesão única: <strong className="text-amber-300 font-mono-num">{insuranceBreakdown.activationFee} 🪙</strong> · Taxa no Rank {portalRank}:{' '}
+                            <strong className="text-emerald-300 font-mono-num">
+                              {insuranceBreakdown.equippedPortalFee} 🪙/portal
+                            </strong>
+                          </div>
+                        </div>
+                        <button
+                          onClick={handleToggleBankInsuranceMain}
+                          className={`px-3 py-2 rounded-xl font-black text-[11px] border-2 shrink-0 transition-all active:scale-95 ${
+                            bankInsurance.active
+                              ? 'bg-rose-600 hover:bg-rose-500 border-white text-white'
+                              : bankGold >= insuranceBreakdown.activationFee
+                              ? 'bg-gradient-to-b from-emerald-400 to-green-600 border-white text-slate-950 shadow-[0_3px_0_#14532d]'
+                              : 'bg-slate-800 border-rose-400/50 text-rose-300'
+                          }`}
+                        >
+                          {bankInsurance.active
+                            ? 'Cancelar'
+                            : `Assinar (${insuranceBreakdown.activationFee} 🪙)`}
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Coberturas Adicionais (Mochila, Chaves e Picaretas/Runas) */}
+                    <div className="flex flex-col gap-2">
+                      <span className="text-[10px] font-black uppercase tracking-wider text-sky-200">
+                        2. Cláusulas Adicionais por Portal (Opcional):
+                      </span>
+
+                      {/* Adicional: Inventário / Mochila */}
+                      <button
+                        onClick={() => handleToggleInsuranceRider('insureBackpack')}
+                        className={`rounded-2xl border-2 p-2.5 text-left flex items-center justify-between gap-2 transition-all ${
+                          bankInsurance.active && bankInsurance.insureBackpack
+                            ? 'bg-emerald-950/80 border-emerald-300 text-white'
+                            : 'bg-indigo-950/60 border-sky-400/30 text-slate-300'
+                        }`}
+                      >
+                        <div>
+                          <div className="text-xs font-black text-white flex items-center gap-1.5">
+                            <span>🎒 Segurar Inventário da Mochila ({runBackpack.length} itens)</span>
+                          </div>
+                          <div className="text-[10px] text-sky-200 font-bold mt-0.5">
+                            Calculado pela quantidade, raridade e poder dos itens na mochila
+                          </div>
+                        </div>
+                        <div className="text-right shrink-0 font-mono-num">
+                          <div className="text-xs font-black text-yellow-300">
+                            +{insuranceBreakdown.backpackPortalFee} 🪙/portal
+                          </div>
+                          <div className="text-[9px] font-extrabold text-emerald-300">
+                            {bankInsurance.active && bankInsurance.insureBackpack
+                              ? '✓ INCLUÍDO'
+                              : 'Toque p/ adicionar'}
+                          </div>
+                        </div>
+                      </button>
+
+                      {/* Adicional: Chaves Douradas */}
+                      <button
+                        onClick={() => handleToggleInsuranceRider('insureKeys')}
+                        className={`rounded-2xl border-2 p-2.5 text-left flex items-center justify-between gap-2 transition-all ${
+                          bankInsurance.active && bankInsurance.insureKeys
+                            ? 'bg-emerald-950/80 border-emerald-300 text-white'
+                            : 'bg-indigo-950/60 border-sky-400/30 text-slate-300'
+                        }`}
+                      >
+                        <div>
+                          <div className="text-xs font-black text-white">
+                            🔑 Segurar Chaves Douradas ({keysCount} salvas)
+                          </div>
+                          <div className="text-[10px] text-sky-200 font-bold mt-0.5">
+                            Impede a perda do seu chaveiro se morrer no Portal
+                          </div>
+                        </div>
+                        <div className="text-right shrink-0 font-mono-num">
+                          <div className="text-xs font-black text-yellow-300">
+                            +{insuranceBreakdown.keysPortalFee} 🪙/portal
+                          </div>
+                          <div className="text-[9px] font-extrabold text-emerald-300">
+                            {bankInsurance.active && bankInsurance.insureKeys
+                              ? '✓ INCLUÍDO'
+                              : 'Toque p/ adicionar'}
+                          </div>
+                        </div>
+                      </button>
+
+                      {/* Adicional: Picaretas & Pedras Rúnicas */}
+                      <button
+                        onClick={() => handleToggleInsuranceRider('insurePickaxes')}
+                        className={`rounded-2xl border-2 p-2.5 text-left flex items-center justify-between gap-2 transition-all ${
+                          bankInsurance.active && bankInsurance.insurePickaxes
+                            ? 'bg-emerald-950/80 border-emerald-300 text-white'
+                            : 'bg-indigo-950/60 border-sky-400/30 text-slate-300'
+                        }`}
+                      >
+                        <div>
+                          <div className="text-xs font-black text-white">
+                            ⛏️ Segurar Picaretas ({pickaxesCount}) & Runas ({runestonesCount})
+                          </div>
+                          <div className="text-[10px] text-sky-200 font-bold mt-0.5">
+                            Mantém suas ferramentas de mineração e visão ao morrer
+                          </div>
+                        </div>
+                        <div className="text-right shrink-0 font-mono-num">
+                          <div className="text-xs font-black text-yellow-300">
+                            +{insuranceBreakdown.pickaxesPortalFee} 🪙/portal
+                          </div>
+                          <div className="text-[9px] font-extrabold text-emerald-300">
+                            {bankInsurance.active && bankInsurance.insurePickaxes
+                              ? '✓ INCLUÍDO'
+                              : 'Toque p/ adicionar'}
+                          </div>
+                        </div>
+                      </button>
+                    </div>
+
+                    {/* Resumo do Desconto por Portal no Cofre */}
+                    <div className="rounded-2xl bg-black/45 border border-amber-400/40 p-3 flex items-center justify-between">
+                      <div>
+                        <div className="text-[10px] font-black text-amber-200 uppercase">
+                          Custo Total por Entrada (Rank {portalRank}):
+                        </div>
+                        <div className="text-[10px] text-slate-300 font-bold">
+                          Saldo no Cofre: <strong className="text-emerald-300 font-mono-num">{bankGold} 🪙</strong>
+                        </div>
+                      </div>
+                      <div className="text-right font-mono-num">
+                        <div className="text-base font-black text-yellow-300">
+                          {insuranceBreakdown.totalPerPortalFee} 🪙 / portal
+                        </div>
+                        <div
+                          className={`text-[9px] font-black ${
+                            !bankInsurance.active
+                              ? 'text-slate-400'
+                              : bankGold >= insuranceBreakdown.totalPerPortalFee
+                              ? 'text-emerald-300'
+                              : 'text-rose-400'
+                          }`}
+                        >
+                          {!bankInsurance.active
+                            ? 'Apólice Desativada'
+                            : bankGold >= insuranceBreakdown.totalPerPortalFee
+                            ? `Cobre ~${Math.floor(
+                                bankGold / Math.max(1, insuranceBreakdown.totalPerPortalFee)
+                              )} incursão(ões)`
+                            : '⚠️ Saldo Insuficiente no Cofre!'}
+                        </div>
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -4585,8 +5630,50 @@ export default function App() {
               />
             </main>
 
-            {/* 3. BARRA INFERIOR DE GAMEPLAY CARTOON */}
-            <footer className="relative z-30 bg-[#172554] border-t-2 border-indigo-400/50 px-3.5 py-2.5 flex flex-col gap-2">
+            {/* 3. BARRA INFERIOR DE GAMEPLAY CARTOON (COM TÔNICO DE CINTO E PEDRA DE RETORNO!) */}
+            <footer className="relative z-30 bg-[#172554] border-t-2 border-indigo-400/50 px-3.5 py-2 flex flex-col gap-1.5">
+              {/* Faixa rápida de Consumíveis de Preparo (Tônico de Cinto + Status do Seguro + Pedra de Retorno) */}
+              {(equippedTonic || returnStoneCount > 0 || runInsuredSnapshot.active) && (
+                <div className="flex items-center justify-between gap-2">
+                  {equippedTonic && !tonicUsedInRun ? (
+                    <button
+                      onClick={handleUseBeltTonicInPortal}
+                      className={`flex-1 py-1.5 px-2.5 rounded-xl bg-gradient-to-r ${BELT_TONICS_CATALOG[equippedTonic].colorClass} border-2 text-white flex items-center justify-between gap-2 shadow-md active:scale-95 transition-all`}
+                    >
+                      <div className="flex items-center gap-1.5 min-w-0">
+                        <span className="text-sm shrink-0">
+                          {BELT_TONICS_CATALOG[equippedTonic].icon}
+                        </span>
+                        <div className="text-left leading-tight truncate">
+                          <div className="text-[10px] font-black text-yellow-200 uppercase">
+                            USAR TÔNICO DE CINTO
+                          </div>
+                          <div className="text-[11px] font-black text-white truncate">
+                            {BELT_TONICS_CATALOG[equippedTonic].name}
+                          </div>
+                        </div>
+                      </div>
+                      <span className="px-2 py-0.5 rounded-lg bg-yellow-300 text-slate-950 text-[9px] font-black font-mono-num shrink-0">
+                        {BELT_TONICS_CATALOG[equippedTonic].effectBadge}
+                      </span>
+                    </button>
+                  ) : (
+                    <div className="text-[10px] font-bold text-slate-300 flex items-center gap-2">
+                      {runInsuredSnapshot.active && (
+                        <span className="px-2 py-0.5 rounded-lg bg-emerald-950 border border-emerald-400/60 text-emerald-300 font-black">
+                          🛡️ Seguro Bancário Ativo
+                        </span>
+                      )}
+                      {returnStoneCount > 0 && (
+                        <span className="px-2 py-0.5 rounded-lg bg-sky-950 border border-cyan-400/60 text-cyan-200 font-black">
+                          📜 {returnStoneCount}x Pedra de Retorno pronta
+                        </span>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+
               <div className="grid grid-cols-2 gap-2">
                 <button
                   onClick={() => setIsLoadoutModalOpen(true)}
@@ -4619,28 +5706,36 @@ export default function App() {
                     onClick={handleEmergencyExtraction}
                     className={`h-12 rounded-xl font-semibold text-xs px-3 flex items-center justify-center gap-1.5 transition-all whitespace-nowrap ${
                       riskSummary.disableEmergencyExit || isRedGateRun
-                        ? 'bg-rose-950/60 border border-rose-500/40 text-rose-300/80 cursor-not-allowed'
+                        ? returnStoneCount > 0
+                          ? 'bg-gradient-to-r from-sky-600 to-indigo-700 hover:from-sky-500 hover:to-indigo-600 border-2 border-cyan-200 text-white shadow-lg'
+                          : 'bg-rose-950/60 border border-rose-500/40 text-rose-300/80 cursor-not-allowed'
                         : 'bg-amber-950/90 hover:bg-amber-900/90 border border-amber-500/60 text-amber-200'
                     }`}
                   >
                     <LogOut
                       className={`w-4 h-4 shrink-0 ${
                         riskSummary.disableEmergencyExit || isRedGateRun
-                          ? 'text-rose-400'
+                          ? returnStoneCount > 0
+                            ? 'text-cyan-200'
+                            : 'text-rose-400'
                           : 'text-amber-400'
                       }`}
                     />
                     <div className="text-left leading-tight">
                       <div className="text-xs font-bold">
-                        {isRedGateRun
-                          ? 'Portal Vermelho'
-                          : riskSummary.disableEmergencyExit
-                          ? 'Voto de Sangue'
+                        {riskSummary.disableEmergencyExit || isRedGateRun
+                          ? returnStoneCount > 0
+                            ? '📜 Usar Pedra de Retorno'
+                            : isRedGateRun
+                            ? 'Portal Vermelho'
+                            : 'Voto de Sangue'
                           : 'Sair p/ Lobby'}
                       </div>
-                      <div className="text-[9px] opacity-80">
+                      <div className="text-[9px] opacity-85">
                         {riskSummary.disableEmergencyExit || isRedGateRun
-                          ? 'Derrote o Boss p/ sair!'
+                          ? returnStoneCount > 0
+                            ? `Rompe bloqueio (Perde Mochila: ${runBackpack.length})`
+                            : 'Sem Pedra 📜 · Derrote o Boss!'
                           : `Perde a Mochila (${runBackpack.length})`}
                       </div>
                     </div>
@@ -4862,7 +5957,7 @@ export default function App() {
                         setRunBackpack((bag) => [...bag, relic]);
                         clearEntityAt(activePortalEvent.x, activePortalEvent.y);
                         setActivePortalEvent(null);
-                        soundFX.playPowerUp(true);
+                        triggerEquipmentReveal(relic, '🎁 Comprado no Mercador do Abismo!', 'SHOP');
                         notifyItemObtained(relic, '🎁 Relíquia do Mercador do Abismo');
                       }}
                       className="w-full rounded-2xl bg-purple-950/80 hover:bg-purple-900 border border-purple-500/60 p-3 text-left flex items-center justify-between transition-all active:scale-95"
@@ -5340,6 +6435,18 @@ export default function App() {
               </div>
             </div>
           </div>
+        )}
+
+        {/* =========================================================================
+            MODAL CINEMATOGRÁFICO DE REVELAÇÃO DE EQUIPAMENTO (LOJA, BAÚS E FORJA)
+           ========================================================================= */}
+        {equipmentReveal && (
+          <EquipmentRevealModal
+            reveal={equipmentReveal}
+            equipped={equipped}
+            onClose={() => setEquipmentReveal(null)}
+            onEquipNow={handleEquipRevealedItem}
+          />
         )}
       </div>
     </div>

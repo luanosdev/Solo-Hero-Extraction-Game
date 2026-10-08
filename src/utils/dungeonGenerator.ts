@@ -447,16 +447,27 @@ export const PORTAL_RANKS_DATA: Record<PortalRank, PortalRankMetadata> = {
   },
 };
 
-export const STARTER_WEAPON: EquipmentItem = {
-  id: 'starter-rusty-blade',
-  name: 'Espadinha de Treino',
-  slot: 'WEAPON',
-  rarity: 'COMMON',
-  level: 1,
-  baseBonus: 2,
-  multBonus: 1.0,
-  iconType: 'SWORD',
-};
+let uniqueItemSeq = 0;
+
+export function generateUniqueItemId(prefix = 'item'): string {
+  uniqueItemSeq += 1;
+  return `${prefix}-${Date.now()}-${uniqueItemSeq}-${Math.random().toString(36).substring(2, 8)}`;
+}
+
+export function createStarterWeapon(): EquipmentItem {
+  return {
+    id: generateUniqueItemId('starter-blade'),
+    name: 'Espadinha de Treino',
+    slot: 'WEAPON',
+    rarity: 'COMMON',
+    level: 1,
+    baseBonus: 2,
+    multBonus: 1.0,
+    iconType: 'SWORD',
+  };
+}
+
+export const STARTER_WEAPON: EquipmentItem = createStarterWeapon();
 
 const ITEM_NAMES: Record<
   EquipmentItem['slot'],
@@ -798,7 +809,7 @@ export function createEquipmentOfRarity(
   const rolledEffects = rollSpecialEffectsForRarity(rarity);
 
   return {
-    id: `item-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+    id: generateUniqueItemId('item'),
     name: chosen.name,
     slot,
     rarity,

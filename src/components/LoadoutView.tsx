@@ -1712,3 +1712,646 @@ export const LoadoutView: React.FC<LoadoutViewProps> = ({
     </div>
   );
 };
+
+export interface EquipmentRevealData {
+  item: EquipmentItem;
+  sourceTitle: string;
+  sourceCategory: 'SHOP' | 'CHEST' | 'FORGE';
+  extraForgedCount?: number;
+}
+
+const RARITY_REVEAL_SPECS: Record<
+  Rarity,
+  {
+    tier: number;
+    stars: string;
+    headline: string;
+    chargeMs: number;
+    rayColorA: string;
+    rayColorB: string;
+    flashColor: string;
+    ringColor: string;
+    particleColors: string[];
+    rayCount: number;
+    shockwaves: number;
+    particles: number;
+    hasCounterRays: boolean;
+    hasArcaneCircle: boolean;
+    hasSacredOuterHalo: boolean;
+    hasLightPillar: boolean;
+    hasLightning: boolean;
+    hasShake: boolean;
+    hasShimmer: boolean;
+  }
+> = {
+  COMMON: {
+    tier: 1,
+    stars: '★',
+    headline: 'EQUIPAMENTO COMUM',
+    chargeMs: 160,
+    rayColorA: 'rgba(148, 163, 184, 0.35)',
+    rayColorB: 'rgba(203, 213, 225, 0.2)',
+    flashColor: 'rgba(226, 232, 240, 0.35)',
+    ringColor: '#cbd5e1',
+    particleColors: ['#e2e8f0', '#94a3b8'],
+    rayCount: 4,
+    shockwaves: 1,
+    particles: 6,
+    hasCounterRays: false,
+    hasArcaneCircle: false,
+    hasSacredOuterHalo: false,
+    hasLightPillar: false,
+    hasLightning: false,
+    hasShake: false,
+    hasShimmer: false,
+  },
+  UNCOMMON: {
+    tier: 2,
+    stars: '★★',
+    headline: 'ACHADO INCOMUM!',
+    chargeMs: 260,
+    rayColorA: 'rgba(74, 222, 128, 0.45)',
+    rayColorB: 'rgba(34, 197, 94, 0.25)',
+    flashColor: 'rgba(74, 222, 128, 0.45)',
+    ringColor: '#4ade80',
+    particleColors: ['#86efac', '#22c55e', '#fef08a'],
+    rayCount: 6,
+    shockwaves: 1,
+    particles: 10,
+    hasCounterRays: false,
+    hasArcaneCircle: false,
+    hasSacredOuterHalo: false,
+    hasLightPillar: false,
+    hasLightning: false,
+    hasShake: false,
+    hasShimmer: true,
+  },
+  RARE: {
+    tier: 3,
+    stars: '★★★',
+    headline: 'TESOURO RARO DESCOBERTO!',
+    chargeMs: 360,
+    rayColorA: 'rgba(56, 189, 248, 0.55)',
+    rayColorB: 'rgba(14, 165, 233, 0.3)',
+    flashColor: 'rgba(56, 189, 248, 0.55)',
+    ringColor: '#38bdf8',
+    particleColors: ['#7dd3fc', '#38bdf8', '#e0f2fe'],
+    rayCount: 8,
+    shockwaves: 2,
+    particles: 14,
+    hasCounterRays: false,
+    hasArcaneCircle: true,
+    hasSacredOuterHalo: false,
+    hasLightPillar: false,
+    hasLightning: false,
+    hasShake: false,
+    hasShimmer: true,
+  },
+  EPIC: {
+    tier: 4,
+    stars: '★★★★',
+    headline: 'RELÍQUIA ÉPICA DESPERTADA!',
+    chargeMs: 460,
+    rayColorA: 'rgba(192, 132, 252, 0.65)',
+    rayColorB: 'rgba(232, 121, 249, 0.4)',
+    flashColor: 'rgba(192, 132, 252, 0.7)',
+    ringColor: '#c084fc',
+    particleColors: ['#e879f9', '#c084fc', '#f0abfc', '#fef08a'],
+    rayCount: 10,
+    shockwaves: 2,
+    particles: 18,
+    hasCounterRays: true,
+    hasArcaneCircle: true,
+    hasSacredOuterHalo: false,
+    hasLightPillar: true,
+    hasLightning: false,
+    hasShake: false,
+    hasShimmer: true,
+  },
+  LEGENDARY: {
+    tier: 5,
+    stars: '★★★★★',
+    headline: 'ARTEFATO LENDÁRIO SUPREMO!',
+    chargeMs: 560,
+    rayColorA: 'rgba(250, 204, 21, 0.8)',
+    rayColorB: 'rgba(245, 158, 11, 0.55)',
+    flashColor: 'rgba(254, 240, 138, 0.85)',
+    ringColor: '#facc15',
+    particleColors: ['#fef08a', '#facc15', '#fb923c', '#ffffff'],
+    rayCount: 14,
+    shockwaves: 3,
+    particles: 24,
+    hasCounterRays: true,
+    hasArcaneCircle: true,
+    hasSacredOuterHalo: true,
+    hasLightPillar: true,
+    hasLightning: true,
+    hasShake: true,
+    hasShimmer: true,
+  },
+  MYTHIC: {
+    tier: 6,
+    stars: '★★★★★★',
+    headline: 'PODER MÍTICO ABISSAL!',
+    chargeMs: 650,
+    rayColorA: 'rgba(251, 113, 133, 0.85)',
+    rayColorB: 'rgba(239, 68, 68, 0.65)',
+    flashColor: 'rgba(254, 205, 211, 0.9)',
+    ringColor: '#fb7185',
+    particleColors: ['#fda4af', '#f43f5e', '#facc15', '#ffffff'],
+    rayCount: 16,
+    shockwaves: 3,
+    particles: 28,
+    hasCounterRays: true,
+    hasArcaneCircle: true,
+    hasSacredOuterHalo: true,
+    hasLightPillar: true,
+    hasLightning: true,
+    hasShake: true,
+    hasShimmer: true,
+  },
+  CELESTIAL: {
+    tier: 7,
+    stars: '★★★★★★★',
+    headline: 'MILAGRE CELESTIAL DIVINO!',
+    chargeMs: 740,
+    rayColorA: 'rgba(103, 232, 249, 0.9)',
+    rayColorB: 'rgba(168, 85, 247, 0.7)',
+    flashColor: 'rgba(255, 255, 255, 0.95)',
+    ringColor: '#67e8f9',
+    particleColors: ['#67e8f9', '#f0abfc', '#fef08a', '#ffffff', '#38bdf8'],
+    rayCount: 20,
+    shockwaves: 3,
+    particles: 34,
+    hasCounterRays: true,
+    hasArcaneCircle: true,
+    hasSacredOuterHalo: true,
+    hasLightPillar: true,
+    hasLightning: true,
+    hasShake: true,
+    hasShimmer: true,
+  },
+};
+
+export const EquipmentRevealModal: React.FC<{
+  reveal: EquipmentRevealData;
+  equipped: Record<EquipSlot, EquipmentItem | null>;
+  onClose: () => void;
+  onEquipNow: (item: EquipmentItem) => void;
+}> = ({ reveal, equipped, onClose, onEquipNow }) => {
+  const { item, sourceTitle, sourceCategory, extraForgedCount } = reveal;
+  const st = RARITY_CARD_STYLES[item.rarity];
+  const spec = RARITY_REVEAL_SPECS[item.rarity];
+  const [stage, setStage] = React.useState<'CHARGING' | 'REVEALED'>('CHARGING');
+
+  React.useEffect(() => {
+    setStage('CHARGING');
+    const timer = window.setTimeout(() => {
+      setStage('REVEALED');
+    }, spec.chargeMs);
+    return () => window.clearTimeout(timer);
+  }, [item.id, spec.chargeMs]);
+
+  const currentEquippedInSlot = equipped[item.slot];
+  const isAlreadyEquipped = currentEquippedInSlot?.id === item.id;
+  const baseDiff = item.baseBonus - (currentEquippedInSlot?.baseBonus || 0);
+  const multDiff = Number(
+    (item.multBonus - (currentEquippedInSlot?.multBonus || 1)).toFixed(2)
+  );
+  const passives = getItemSpecialEffects(item);
+
+  return (
+    <div
+      className="fixed inset-0 z-[95] bg-slate-950/90 backdrop-blur-md flex items-center justify-center p-4 select-none overflow-hidden"
+      onClick={() => {
+        if (stage === 'CHARGING') {
+          setStage('REVEALED');
+        } else {
+          onClose();
+        }
+      }}
+    >
+      {/* Flash luminoso na revelação (Épico, Lendário, Mítico, Celestial) */}
+      {stage === 'REVEALED' && spec.tier >= 3 && (
+        <div
+          key={`flash-${item.id}`}
+          className="absolute inset-0 pointer-events-none animate-reveal-flash z-20"
+          style={{ backgroundColor: spec.flashColor }}
+        />
+      )}
+
+      {/* =====================================================================
+          EFEITOS DE FUNDO ESCALÁVEIS POR RARIDADE (RAIOS SOLARES, RUNAS, PILAR E PARTÍCULAS)
+         ===================================================================== */}
+      <div className="absolute inset-0 flex items-center justify-center pointer-events-none overflow-hidden">
+        {/* Brilho radial central da raridade */}
+        <div
+          className="w-[460px] h-[460px] rounded-full transition-all duration-500"
+          style={{
+            background: `radial-gradient(circle, ${spec.rayColorA} 0%, ${spec.rayColorB} 38%, transparent 72%)`,
+            transform: stage === 'CHARGING' ? 'scale(0.55)' : 'scale(1.25)',
+          }}
+        />
+
+        {/* Coluna de Luz Ascendente (Épico+) */}
+        {stage === 'REVEALED' && spec.hasLightPillar && (
+          <div
+            className="absolute inset-y-0 w-44 opacity-70 blur-md transition-all duration-500"
+            style={{
+              background: `linear-gradient(90deg, transparent 0%, ${spec.rayColorA} 50%, transparent 100%)`,
+            }}
+          />
+        )}
+
+        {/* Feixes Solares Giratórios (God Rays - quantidade escala com a raridade!) */}
+        {spec.rayCount > 0 && (
+          <svg
+            viewBox="-200 -200 400 400"
+            className={`absolute w-[520px] h-[520px] animate-ray-spin transition-opacity duration-300 ${
+              stage === 'CHARGING' ? 'opacity-40 scale-75' : 'opacity-90 scale-100'
+            }`}
+          >
+            {Array.from({ length: spec.rayCount }).map((_, idx) => {
+              const angle = (360 / spec.rayCount) * idx;
+              const widthDeg = Math.max(6, Math.floor(140 / spec.rayCount));
+              return (
+                <g key={idx} transform={`rotate(${angle})`}>
+                  <polygon
+                    points={`0,0 -${widthDeg},-195 ${widthDeg},-195`}
+                    fill={idx % 2 === 0 ? spec.rayColorA : spec.rayColorB}
+                  />
+                </g>
+              );
+            })}
+          </svg>
+        )}
+
+        {/* Segundo feixe contra-rotativo (Épico, Lendário, Mítico, Celestial) */}
+        {spec.hasCounterRays && stage === 'REVEALED' && (
+          <svg
+            viewBox="-200 -200 400 400"
+            className="absolute w-[440px] h-[440px] animate-ray-spin-reverse opacity-75"
+          >
+            {Array.from({ length: Math.floor(spec.rayCount / 2) }).map((_, idx) => {
+              const angle = (360 / Math.floor(spec.rayCount / 2)) * idx + 15;
+              return (
+                <g key={idx} transform={`rotate(${angle})`}>
+                  <polygon points="0,0 -12,-180 12,-180" fill={spec.rayColorA} />
+                </g>
+              );
+            })}
+          </svg>
+        )}
+
+        {/* Círculo Rúnico Arcano Giratório (Raro+) */}
+        {spec.hasArcaneCircle && (
+          <svg
+            viewBox="-160 -160 320 320"
+            className="absolute w-[340px] h-[340px] animate-ray-spin opacity-65"
+          >
+            <circle
+              cx="0"
+              cy="0"
+              r="128"
+              fill="none"
+              stroke={spec.ringColor}
+              strokeWidth="2"
+              strokeDasharray="10 6"
+            />
+            <circle
+              cx="0"
+              cy="0"
+              r="116"
+              fill="none"
+              stroke={spec.ringColor}
+              strokeWidth="1.2"
+              strokeOpacity="0.6"
+            />
+            <polygon
+              points="0,-116 100,58 -100,58"
+              fill="none"
+              stroke={spec.ringColor}
+              strokeWidth="1.5"
+              strokeOpacity="0.55"
+            />
+            <polygon
+              points="0,116 100,-58 -100,-58"
+              fill="none"
+              stroke={spec.ringColor}
+              strokeWidth="1.5"
+              strokeOpacity="0.55"
+            />
+          </svg>
+        )}
+
+        {/* Halo Sagrado Exterior (Lendário, Mítico, Celestial) */}
+        {spec.hasSacredOuterHalo && stage === 'REVEALED' && (
+          <svg
+            viewBox="-200 -200 400 400"
+            className="absolute w-[430px] h-[430px] animate-ray-spin-reverse opacity-80"
+          >
+            <circle
+              cx="0"
+              cy="0"
+              r="168"
+              fill="none"
+              stroke={spec.ringColor}
+              strokeWidth="2.5"
+              strokeDasharray="4 10"
+            />
+            {Array.from({ length: 8 }).map((_, i) => (
+              <g key={i} transform={`rotate(${i * 45}) translate(0, -168)`}>
+                <polygon points="0,-7 5,0 0,7 -5,0" fill="#ffffff" />
+              </g>
+            ))}
+          </svg>
+        )}
+
+        {/* Ondas de Choque Expansivas na Revelação */}
+        {stage === 'REVEALED' &&
+          Array.from({ length: spec.shockwaves }).map((_, idx) => (
+            <div
+              key={`wave-${idx}`}
+              className="absolute w-48 h-48 rounded-full border-4"
+              style={{
+                borderColor: spec.ringColor,
+                animation: `revealShockwaveExpand ${0.65 + idx * 0.22}s ease-out ${
+                  idx * 0.12
+                }s forwards`,
+              }}
+            />
+          ))}
+
+        {/* Raios Elétricos / Fendas de Energia (Lendário, Mítico, Celestial) */}
+        {stage === 'REVEALED' && spec.hasLightning && (
+          <svg
+            viewBox="-180 -180 360 360"
+            className="absolute w-[390px] h-[390px] opacity-85 animate-pulse"
+          >
+            <polyline
+              points="-130,-90 -85,-45 -105,-20 -55,25"
+              fill="none"
+              stroke="#ffffff"
+              strokeWidth="3"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+            <polyline
+              points="135,-80 85,-35 105,-10 50,35"
+              fill="none"
+              stroke={spec.ringColor}
+              strokeWidth="3"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+            {spec.tier >= 6 && (
+              <>
+                <polyline
+                  points="-110,95 -65,50 -80,25 -35,-10"
+                  fill="none"
+                  stroke={spec.ringColor}
+                  strokeWidth="2.5"
+                />
+                <polyline
+                  points="115,95 70,45 85,20 40,-15"
+                  fill="none"
+                  stroke="#fef08a"
+                  strokeWidth="2.5"
+                />
+              </>
+            )}
+          </svg>
+        )}
+
+        {/* Partículas Mágicas Ascendentes (quantidade e cores escalam com a raridade!) */}
+        {stage === 'REVEALED' &&
+          Array.from({ length: spec.particles }).map((_, idx) => {
+            const leftPct = 12 + ((idx * 37) % 76);
+            const topPct = 30 + ((idx * 29) % 50);
+            const delay = (idx % 7) * 0.12;
+            const duration = 1.15 + (idx % 5) * 0.22;
+            const color = spec.particleColors[idx % spec.particleColors.length];
+            const size = spec.tier >= 5 && idx % 3 === 0 ? 10 : 7;
+
+            return (
+              <div
+                key={`pt-${idx}`}
+                className="absolute rounded-full"
+                style={{
+                  left: `${leftPct}%`,
+                  top: `${topPct}%`,
+                  width: `${size}px`,
+                  height: `${size}px`,
+                  backgroundColor: color,
+                  boxShadow: `0 0 10px ${color}`,
+                  animation: `revealParticleFloat ${duration}s ease-out ${delay}s infinite`,
+                }}
+              />
+            );
+          })}
+      </div>
+
+      {/* =====================================================================
+          ESTÁGIO 1: ANTECIPAÇÃO / CARREGAMENTO (BAÚ VIBRANDO / BIGORNA DA FORJA / PEDESTAL)
+         ===================================================================== */}
+      {stage === 'CHARGING' ? (
+        <div className="relative z-30 flex flex-col items-center justify-center text-center gap-4 animate-reveal-shake">
+          <div
+            className={`w-28 h-28 rounded-3xl bg-gradient-to-b ${st.bgGrad} ${st.border} border-4 flex items-center justify-center shadow-[0_0_45px_${st.glowColor}] animate-bounce`}
+          >
+            <span className="text-5xl drop-shadow-lg">
+              {sourceCategory === 'CHEST'
+                ? '📦'
+                : sourceCategory === 'FORGE'
+                ? '⚒️'
+                : '🛍️'}
+            </span>
+          </div>
+          <div className="px-4 py-1.5 rounded-full bg-slate-900/90 border-2 border-white/60 text-xs font-black text-yellow-300 uppercase tracking-wider shadow-lg">
+            {sourceCategory === 'FORGE'
+              ? '✨ Fundindo Essência Arcana...'
+              : sourceCategory === 'CHEST'
+              ? '✨ Abrindo Baú Misterioso...'
+              : '✨ Revelando Equipamento...'}
+          </div>
+        </div>
+      ) : (
+        /* =====================================================================
+           ESTÁGIO 2: EXPLOSÃO E CARD DETALHADO DO EQUIPAMENTO REVELADO
+          ===================================================================== */
+        <div
+          onClick={(e) => e.stopPropagation()}
+          className={`relative z-30 w-full max-w-[365px] flex flex-col items-center ${
+            spec.hasShake ? 'animate-reveal-shake' : ''
+          }`}
+        >
+          {/* Cabeçalho de Origem (Loja, Baú ou Forja) */}
+          <div className="mb-2 px-3.5 py-1 rounded-full bg-slate-900/95 border-2 border-sky-300/70 text-[10px] font-black text-sky-200 uppercase tracking-wider shadow-lg flex items-center gap-1.5">
+            <span>{sourceTitle}</span>
+            {extraForgedCount && extraForgedCount > 1 && (
+              <span className="px-1.5 py-0.5 rounded-full bg-yellow-300 text-slate-950 font-black">
+                +{extraForgedCount} Itens!
+              </span>
+            )}
+          </div>
+
+          {/* CARD PRINCIPAL COM ENTRADA ELÁSTICA E BRILHO HOLOGRÁFICO */}
+          <div
+            className={`relative w-full rounded-3xl bg-gradient-to-b ${st.bgGrad} ${st.border} border-4 p-4 shadow-[0_12px_45px_rgba(0,0,0,0.85)] text-white flex flex-col items-center text-center gap-3 overflow-hidden animate-reveal-card`}
+            style={{
+              boxShadow: `0 0 ${18 + spec.tier * 8}px ${st.glowColor}, 0 8px 0 rgba(15,23,42,0.85)`,
+            }}
+          >
+            {/* Feixe Holográfico (Shimmer Sweep) atravessando o Card em raridades Raro+ */}
+            {spec.hasShimmer && (
+              <div className="absolute inset-0 pointer-events-none overflow-hidden">
+                <div className="w-1/2 h-full bg-gradient-to-r from-transparent via-white/30 to-transparent animate-reveal-shimmer" />
+              </div>
+            )}
+
+            {/* Faixa de Estrelas e Título de Raridade */}
+            <div className="relative z-10 flex flex-col items-center gap-0.5">
+              <div className="text-xs font-black tracking-[0.2em] text-yellow-300 drop-shadow-[0_2px_2px_rgba(0,0,0,0.9)]">
+                {spec.stars}
+              </div>
+              <span
+                className={`px-3 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider ${st.badgeBg} border-2 border-white text-white shadow`}
+              >
+                {st.label} · Nv.{item.level}
+              </span>
+              <div className="text-[11px] font-black text-yellow-200 uppercase tracking-wide mt-0.5 cartoon-text-outline">
+                {spec.headline}
+              </div>
+            </div>
+
+            {/* PEDESTAL CENTRAL COM ÍCONE GIGANTE ANIMADO */}
+            <div className="relative z-10 my-1 flex items-center justify-center">
+              {/* Halo pulsante atrás do ícone */}
+              <div
+                className="absolute w-28 h-28 rounded-full blur-md animate-pulse"
+                style={{ backgroundColor: spec.rayColorA }}
+              />
+              <div className="relative w-24 h-24 rounded-3xl bg-slate-950/85 border-3 border-white flex items-center justify-center shadow-2xl animate-reveal-icon">
+                <SlotCornerBadge slot={item.slot} />
+                {(item.refineLevel || 0) > 0 && (
+                  <span className="absolute top-1.5 right-1.5 px-1.5 py-0.5 rounded-md bg-yellow-300 text-slate-950 text-[10px] font-black shadow">
+                    +{item.refineLevel}
+                  </span>
+                )}
+                <EquipmentIconSVG
+                  iconType={item.iconType}
+                  className="w-18 h-18 drop-shadow-[0_6px_8px_rgba(0,0,0,0.85)] animate-float"
+                />
+              </div>
+            </div>
+
+            {/* Nome do Equipamento e Slot */}
+            <div className="relative z-10">
+              <h2 className="text-lg font-black font-display text-white cartoon-text-outline leading-tight">
+                {item.name}
+                {(item.refineLevel || 0) > 0 ? ` +${item.refineLevel}` : ''}
+              </h2>
+              <p className="text-[11px] font-bold text-white/90 mt-0.5">
+                Slot: {SLOT_LABELS[item.slot]}
+              </p>
+            </div>
+
+            {/* Pílulas de Atributos Principais (+Base e xMult) */}
+            <div className="relative z-10 w-full grid grid-cols-2 gap-2 font-mono-num">
+              <div className="rounded-2xl bg-slate-950/80 border-2 border-emerald-400/80 p-2 flex flex-col items-center">
+                <span className="text-[9px] font-black text-emerald-300 uppercase">
+                  Força Base
+                </span>
+                <span className="text-base font-black text-white">
+                  +{item.baseBonus}
+                </span>
+              </div>
+              <div className="rounded-2xl bg-slate-950/80 border-2 border-amber-300/80 p-2 flex flex-col items-center">
+                <span className="text-[9px] font-black text-amber-300 uppercase">
+                  Multiplicador
+                </span>
+                <span className="text-base font-black text-yellow-300">
+                  {item.multBonus > 1 ? `x${item.multBonus}` : 'x1.00 (Sem Mult)'}
+                </span>
+              </div>
+            </div>
+
+            {/* Passivas Especiais (se tiver) */}
+            {passives.length > 0 && (
+              <div className="relative z-10 w-full rounded-2xl bg-slate-950/85 border-2 border-cyan-300/70 p-2.5 text-left flex flex-col gap-1">
+                <div className="text-[9px] font-black text-cyan-300 uppercase tracking-wider flex items-center justify-between">
+                  <span>✨ Super Poderes Passivos</span>
+                  <span>{'★'.repeat(passives.length)}</span>
+                </div>
+                {passives.map((eff, i) => (
+                  <div
+                    key={i}
+                    className="text-[11px] font-extrabold text-white leading-snug"
+                  >
+                    • {eff.description}
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* Comparativo Rápido com o Item Equipado no Mesmo Slot */}
+            {!isAlreadyEquipped && (
+              <div className="relative z-10 w-full rounded-xl bg-black/45 border border-white/25 px-3 py-1.5 text-[10px] font-bold flex items-center justify-between">
+                <span className="text-white/85">
+                  {currentEquippedInSlot
+                    ? `Vs. Equipado (${currentEquippedInSlot.name}):`
+                    : 'Slot vazio no Herói:'}
+                </span>
+                <span className="font-mono-num font-black">
+                  <span
+                    className={
+                      baseDiff >= 0 ? 'text-emerald-300' : 'text-rose-300'
+                    }
+                  >
+                    {baseDiff >= 0 ? `+${baseDiff}` : baseDiff} Base
+                  </span>
+                  {' · '}
+                  <span
+                    className={
+                      multDiff >= 0 ? 'text-yellow-300' : 'text-rose-300'
+                    }
+                  >
+                    {multDiff >= 0 ? `+${multDiff}x` : `${multDiff}x`}
+                  </span>
+                </span>
+              </div>
+            )}
+
+            {/* Botões de Ação Imediata */}
+            <div className="relative z-10 w-full grid grid-cols-2 gap-2 pt-1">
+              {!isAlreadyEquipped ? (
+                <button
+                  onClick={() => {
+                    onEquipNow(item);
+                    onClose();
+                  }}
+                  className="h-11 rounded-2xl bg-gradient-to-b from-emerald-400 to-green-600 hover:from-emerald-300 hover:to-green-500 border-2 border-white text-slate-950 font-black text-xs flex items-center justify-center gap-1.5 shadow-[0_4px_0_#065f46] active:scale-95 transition-all"
+                >
+                  <Check className="w-4 h-4 stroke-[3]" />
+                  <span>Equipar Agora!</span>
+                </button>
+              ) : (
+                <div className="h-11 rounded-2xl bg-emerald-950/80 border-2 border-emerald-400 text-emerald-200 font-black text-xs flex items-center justify-center">
+                  ✓ Já Equipado
+                </div>
+              )}
+
+              <button
+                onClick={onClose}
+                className="h-11 rounded-2xl bg-slate-900/90 hover:bg-slate-800 border-2 border-white/80 text-white font-black text-xs flex items-center justify-center gap-1.5 shadow-[0_4px_0_#020617] active:scale-95 transition-all"
+              >
+                <span>Guardar e Continuar</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+

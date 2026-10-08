@@ -105,6 +105,112 @@ class SoundController {
       osc.stop(now + idx * 0.14 + 0.25);
     });
   }
+
+  playItemReveal(
+    rarity:
+      | 'COMMON'
+      | 'UNCOMMON'
+      | 'RARE'
+      | 'EPIC'
+      | 'LEGENDARY'
+      | 'MYTHIC'
+      | 'CELESTIAL'
+  ) {
+    const ctx = this.getContext();
+    if (!ctx) return;
+    const now = ctx.currentTime;
+
+    const sequences: Record<
+      string,
+      { notes: number[]; wave: OscillatorType; step: number; dur: number; vol: number }
+    > = {
+      COMMON: {
+        notes: [392, 523.25],
+        wave: 'sine',
+        step: 0.06,
+        dur: 0.15,
+        vol: 0.1,
+      },
+      UNCOMMON: {
+        notes: [392, 493.88, 587.33],
+        wave: 'triangle',
+        step: 0.06,
+        dur: 0.18,
+        vol: 0.12,
+      },
+      RARE: {
+        notes: [440, 554.37, 659.25, 880],
+        wave: 'triangle',
+        step: 0.065,
+        dur: 0.22,
+        vol: 0.13,
+      },
+      EPIC: {
+        notes: [392, 493.88, 587.33, 783.99, 987.77],
+        wave: 'sawtooth',
+        step: 0.065,
+        dur: 0.26,
+        vol: 0.13,
+      },
+      LEGENDARY: {
+        notes: [261.63, 329.63, 392, 523.25, 659.25, 783.99, 1046.5],
+        wave: 'sawtooth',
+        step: 0.06,
+        dur: 0.34,
+        vol: 0.15,
+      },
+      MYTHIC: {
+        notes: [220, 277.18, 329.63, 440, 554.37, 659.25, 880, 1108.73],
+        wave: 'sawtooth',
+        step: 0.055,
+        dur: 0.38,
+        vol: 0.16,
+      },
+      CELESTIAL: {
+        notes: [261.63, 329.63, 392, 493.88, 587.33, 783.99, 987.77, 1174.66, 1567.98],
+        wave: 'triangle',
+        step: 0.055,
+        dur: 0.45,
+        vol: 0.17,
+      },
+    };
+
+    const cfg = sequences[rarity] || sequences.COMMON;
+
+    // Impact sub-bass para Épico ou superior
+    if (
+      rarity === 'EPIC' ||
+      rarity === 'LEGENDARY' ||
+      rarity === 'MYTHIC' ||
+      rarity === 'CELESTIAL'
+    ) {
+      const sub = ctx.createOscillator();
+      const subGain = ctx.createGain();
+      sub.type = 'sine';
+      sub.frequency.setValueAtTime(140, now);
+      sub.frequency.exponentialRampToValueAtTime(42, now + 0.35);
+      subGain.gain.setValueAtTime(0.22, now);
+      subGain.gain.exponentialRampToValueAtTime(0.001, now + 0.38);
+      sub.connect(subGain);
+      subGain.connect(ctx.destination);
+      sub.start(now);
+      sub.stop(now + 0.38);
+    }
+
+    cfg.notes.forEach((freq, i) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = cfg.wave;
+      const startTime = now + i * cfg.step;
+      osc.frequency.setValueAtTime(freq, startTime);
+      gain.gain.setValueAtTime(cfg.vol, startTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, startTime + cfg.dur);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start(startTime);
+      osc.stop(startTime + cfg.dur);
+    });
+  }
 }
 
 export const soundFX = new SoundController();
